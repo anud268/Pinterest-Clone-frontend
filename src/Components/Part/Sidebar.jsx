@@ -23,13 +23,11 @@ export default function Sidebar({section}) {
     const pic = useSelector((state)=>state.pic)
     const sidebar = useSelector((state)=>state.sidebar)
     const select = useSelector((state)=>state.select)
-    console.log('redex pic:',pic);
     const[dark,setDark] = useState(false)
     
     const fetchUser=async()=>{
         try {
             const {data} = await axios.get('http://localhost:3500/fetchuser',{withCredentials: true})
-            console.log('user detials-',data);
             if(!data._id){
                 navigate('/signin')
             }
@@ -40,10 +38,8 @@ export default function Sidebar({section}) {
     }
     const fetchProfilePic = async (id)=>{
         try {
-            console.log('userId for profile pic:',id);
             
             const {data} = await axios.get(`http://localhost:3500/profilepic/${id}`)
-            console.log('fetch profile pic:',data);
             dispatch(addPic(data))
         } catch (error) {
             console.log(error);
@@ -73,7 +69,6 @@ export default function Sidebar({section}) {
     const logout = async()=>{
         try {
             const {data} = await axios.post('http://localhost:3500/logout',{},{withCredentials: true})
-            console.log('logout response-',data);
             navigate('/signin')
         } catch (error) {
             console.log(error);
