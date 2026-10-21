@@ -7,6 +7,18 @@ import AccountMenu from './AccountMenu'
 import Logo from './Logo'
 import useNavItems from './useNavItems'
 
+// Unread count bubble on a nav icon
+function NavBadge({ count }) {
+  if (!count) return null
+  return (
+    <span className="absolute -top-1.5 -right-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-brand-600 px-1 text-[10px] leading-none font-bold text-white">
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
+const navLabel = (item) => (item.badge ? `${item.label} (${item.badge} unread)` : item.label)
+
 // Desktop navigation rail; collapses to icons only.
 export default function Sidebar({ collapsed, onToggle }) {
   const user = useSelector(selectUser)
@@ -31,7 +43,8 @@ export default function Sidebar({ collapsed, onToggle }) {
               <li key={item.label}>
                 <NavLink
                   to={item.to}
-                  title={collapsed ? item.label : undefined}
+                  title={collapsed ? navLabel(item) : undefined}
+                  aria-label={item.badge ? navLabel(item) : undefined}
                   aria-current={item.active ? 'page' : undefined}
                   className={`flex h-12 items-center gap-4 rounded-2xl text-[15px] font-semibold transition-colors ${
                     collapsed ? 'justify-center' : 'px-4'
@@ -40,7 +53,10 @@ export default function Sidebar({ collapsed, onToggle }) {
                   {item.avatar ? (
                     <Avatar src={user?.image} name={user?.fullname} size="xs" className={item.active ? 'ring-2 ring-white' : ''} />
                   ) : (
-                    <Icon className="text-[22px]" aria-hidden="true" />
+                    <span className="relative">
+                      <Icon className="text-[22px]" aria-hidden="true" />
+                      <NavBadge count={item.badge} />
+                    </span>
                   )}
                   {!collapsed && <span>{item.label}</span>}
                 </NavLink>
@@ -86,7 +102,7 @@ export function MobileNav() {
             <li key={item.label}>
               <NavLink
                 to={item.to}
-                aria-label={item.label}
+                aria-label={navLabel(item)}
                 aria-current={item.active ? 'page' : undefined}
                 className={`flex size-12 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10px] font-semibold ${
                   item.active ? 'text-ink' : 'text-ink-subtle'
@@ -95,7 +111,10 @@ export function MobileNav() {
                 {item.avatar ? (
                   <Avatar src={user?.image} name={user?.fullname} size="xs" className={item.active ? 'ring-2 ring-ink' : ''} />
                 ) : (
-                  <Icon className="text-2xl" aria-hidden="true" />
+                  <span className="relative">
+                    <Icon className="text-2xl" aria-hidden="true" />
+                    <NavBadge count={item.badge} />
+                  </span>
                 )}
                 <span>{item.label}</span>
               </NavLink>

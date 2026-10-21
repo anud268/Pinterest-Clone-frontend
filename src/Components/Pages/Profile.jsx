@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { CiCamera } from 'react-icons/ci'
-import { IoBanOutline, IoLocationOutline, IoPersonOutline, IoShareSocialOutline } from 'react-icons/io5'
+import { IoBanOutline, IoChatbubbleEllipsesOutline, IoLocationOutline, IoPersonOutline, IoShareSocialOutline } from 'react-icons/io5'
+import { openConversationWith } from '../../chat/chatStore'
 import { api, errorMessage } from '../../lib/api'
 import { toast } from '../../lib/toast'
 import { useDocumentTitle } from '../../lib/hooks'
@@ -91,6 +92,8 @@ export default function Profile() {
   const [tab, setTab] = useState('created')
   const [confirmBlock, setConfirmBlock] = useState(false)
   const [blocking, setBlocking] = useState(false)
+  const [openingChat, setOpeningChat] = useState(false)
+  const navigate = useNavigate()
 
   const displayName = profile ? [profile.firstname, profile.lastname].filter(Boolean).join(' ') || profile.fullname : ''
   useDocumentTitle(displayName || 'Profile')
@@ -128,6 +131,18 @@ export default function Profile() {
       toast.error(errorMessage(err))
     } finally {
       setBlocking(false)
+    }
+  }
+
+  const startChat = async () => {
+    setOpeningChat(true)
+    try {
+      const conversation = await openConversationWith(id)
+      navigate(`/messages/${conversation._id}`)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setOpeningChat(false)
     }
   }
 
@@ -190,9 +205,16 @@ export default function Profile() {
               Edit profile
             </Link>
           ) : (
-            <Button variant={blocked ? 'secondary' : 'outline'} onClick={() => setConfirmBlock(true)}>
-              <IoBanOutline aria-hidden="true" /> {blocked ? 'Unblock' : 'Block'}
-            </Button>
+            <>
+              {!blocked && (
+                <Button onClick={startChat} loading={openingChat}>
+                  <IoChatbubbleEllipsesOutline aria-hidden="true" /> Message
+                </Button>
+              )}
+              <Button variant={blocked ? 'secondary' : 'outline'} onClick={() => setConfirmBlock(true)}>
+                <IoBanOutline aria-hidden="true" /> {blocked ? 'Unblock' : 'Block'}
+              </Button>
+            </>
           )}
         </div>
       </header>
