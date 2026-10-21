@@ -1,63 +1,101 @@
 @import "tailwindcss";
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
 
-  color-scheme: light dark;
-  /* color: rgba(0, 0, 0, 0.87); */
-  background-color: #ffffff;
+/* ─── Design tokens ──────────────────────────────────────────────────────────
+   Brand red matches the logo. Neutrals are warm greys so photos stay the focus. */
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-brand-50: #fdf1f1;
+  --color-brand-100: #fbdfe0;
+  --color-brand-500: #dc2f36;
+  --color-brand-600: #cc2229;
+  --color-brand-700: #ab1b21;
+
+  --color-ink: #171615;
+  --color-ink-muted: #5c5955;
+  --color-ink-subtle: #8c8883;
+  --color-canvas: #ffffff;
+  --color-surface: #f5f4f2;
+  --color-surface-strong: #e9e7e4;
+  --color-line: #e6e3df;
+
+  --color-success: #127a4b;
+  --color-danger: #c4262e;
+
+  --shadow-card: 0 1px 2px rgb(23 22 21 / 0.06), 0 2px 8px rgb(23 22 21 / 0.06);
+  --shadow-pop: 0 8px 28px rgb(23 22 21 / 0.16), 0 2px 6px rgb(23 22 21 / 0.08);
+
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  --animate-pop-in: pop-in 160ms ease-out;
+  --animate-fade-in: fade-in 200ms ease-out;
+
+  @keyframes shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+:root {
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
 body {
   margin: 0;
-  display: flex;
-  /* place-items: center; */
   min-width: 320px;
-  min-height: 100vh;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #ff0000;
-  cursor: pointer;
-  transition: border-color 0.25s;
+::selection {
+  background: var(--color-brand-100);
 }
 
-
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+@layer components {
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-surface) 0%, var(--color-surface-strong) 50%, var(--color-surface) 100%);
+    background-size: 800px 100%;
+    animation: var(--animate-shimmer);
   }
-  a:hover {
-    color: #747bff;
+
+  .no-scrollbar {
+    scrollbar-width: none;
   }
-  button {
-    background-color: #f9f9f9;
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Native <dialog> backdrop */
+  dialog::backdrop {
+    background: rgb(23 22 21 / 0.55);
+    backdrop-filter: blur(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

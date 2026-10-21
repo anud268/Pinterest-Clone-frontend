@@ -1,371 +1,296 @@
-import axios from 'axios';
-import { useFormik } from 'formik';
-import { useEffect, useState, useCallback } from 'react';
-import { FaChevronDown } from 'react-icons/fa';
-import { GoHomeFill } from 'react-icons/go';
-import { HiOutlineArrowLeftStartOnRectangle } from 'react-icons/hi2';
-import { IoCloseSharp } from 'react-icons/io5';
-import { Link } from 'react-router-dom';
-import Scrollbar from 'react-scrollbars-custom';
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { IoAlertCircleOutline, IoClose, IoImageOutline, IoImagesOutline } from 'react-icons/io5'
+import { FiTrash2 } from 'react-icons/fi'
+import { api, errorMessage } from '../../lib/api'
+import { useDocumentTitle } from '../../lib/hooks'
+import { imageUrl } from '../../lib/image'
+import { toast } from '../../lib/toast'
+import Button, { IconButton } from '../UI/Button'
+import { ConfirmDialog } from '../UI/Dialog'
+import EmptyState from '../UI/EmptyState'
+import { Alert, TextField } from '../UI/Field'
+import { AdminHeader } from './AdminLayout'
 
-const API_BASE_URL = 'http://localhost:3500';
+const MAX_BYTES = 5 * 1024 * 1024
+const TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']
+
+const validateFile = (file) => {
+  if (!file) return 'Please choose an image'
+  if (!TYPES.includes(file.type)) return 'Use a JPEG, PNG, WebP, GIF or AVIF image'
+  if (file.size > MAX_BYTES) return 'Images must be 5MB or smaller'
+  return null
+}
 
 export default function AdminExplore() {
-  const [cards, setCards] = useState([]);
-  const [category, setCategory] = useState([]);
-  const [showCategory, setShowCategory] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [selectCat,setSelectCat] = useState('')
+  useDocumentTitle('Admin · Explore cards')
+  const selectId = useId()
+  const fileInputId = useId()
+  const fileRef = useRef(null)
 
-  const formik = useFormik({
-    initialValues: {
-      image: '',
-      title: '',
-      subtitle: '',
-      imagePreview: '',
-    },
-    validate: (values) => {
-      const errors = {};
-      if (!values.image) errors.image = 'Image is required';
-      if (!values.title) errors.title = 'Title is required';
-      if (!values.subtitle) errors.subtitle = 'Description is required';
-      return errors;
-    },
-    onSubmit: (values) => {
-      handleSubmitExplore(values);
-    },
-  });
+  const [cards, setCards] = useState([])
+  const [cardsStatus, setCardsStatus] = useState('loading')
+  const [cardsError, setCardsError] = useState(null)
+  const [categories, setCategories] = useState([])
+  const [categoriesError, setCategoriesError] = useState(null)
 
-  const handleSubmitExplore = async (values) => {
+  const [file, setFile] = useState(null)
+  const [preview, setPreview] = useState('')
+  const [title, setTitle] = useState('')
+  const [subtitle, setSubtitle] = useState('')
+  const [errors, setErrors] = useState({})
+  const [dragging, setDragging] = useState(false)
+  const [progress, setProgress] = useState(null)
+  const [submitError, setSubmitError] = useState(null)
+
+  const [removing, setRemoving] = useState(null)
+  const [removeBusy, setRemoveBusy] = useState(false)
+
+  const loadCards = useCallback(async (signal) => {
+    setCardsStatus('loading')
     try {
-      setLoading(true);
-      setError('');
-      
-      const formData = new FormData();
-      formData.append('image', values.image);
-      formData.append('title', values.title);
-      formData.append('subtitle', values.subtitle);
+      const { data } = await api.get('/fetchcards', { signal })
+      setCards(data.cards)
+      setCardsStatus('ready')
+    } catch (err) {
+      if (signal?.aborted) return
+      setCardsError(errorMessage(err))
+      setCardsStatus('error')
+    }
+  }, [])
 
-      const { data } = await axios.post(`${API_BASE_URL}/setexplore`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+  useEffect(() => {
+    const controller = new AbortController()
+    loadCards(controller.signal)
+    api
+      .get('/fetchcat', { signal: controller.signal })
+      .then(({ data }) => setCategories(data.categories))
+      .catch((err) => !controller.signal.aborted && setCategoriesError(errorMessage(err, 'Could not load categories')))
+    return () => controller.abort()
+  }, [loadCards])
 
-      // Update cards state more efficiently
-      setCards((prev) => {
-        const filtered = prev.filter((card) => card._id !== data._id);
-        return [data, ...filtered];
-      });
-      
-      formik.resetForm();
-      setSelectCat('')
-      formik.setFieldValue('image', '');
-    } catch (error) {
-      console.error('Error uploading explore data:', error);
-      setError('Failed to upload explore data. Please try again.');
+  // Release the preview object URL when it changes or the page unmounts
+  useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview])
+
+  const pickFile = (next) => {
+    const message = validateFile(next)
+    setErrors((e) => ({ ...e, image: message }))
+    if (message) return
+    setFile(next)
+    setPreview(URL.createObjectURL(next))
+  }
+
+  const clearFile = () => {
+    setFile(null)
+    setPreview('')
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const submit = async (event) => {
+    event.preventDefault()
+    const next = {
+      image: validateFile(file),
+      title: title ? null : 'Please choose a category',
+      subtitle: subtitle.trim() ? null : 'Please add a short description',
+    }
+    setErrors(next)
+    if (Object.values(next).some(Boolean)) return
+
+    const form = new FormData()
+    form.append('image', file)
+    form.append('title', title)
+    form.append('subtitle', subtitle.trim())
+
+    setSubmitError(null)
+    setProgress(0)
+    try {
+      const { data } = await api.post('/setexplore', form, {
+        onUploadProgress: (e) => e.total && setProgress(Math.round((e.loaded / e.total) * 100)),
+      })
+      setCards((list) => [data.card, ...list.filter((c) => c._id !== data.card._id)])
+      setCardsStatus('ready')
+      clearFile()
+      setTitle('')
+      setSubtitle('')
+      toast.success('Explore card created')
+    } catch (err) {
+      setSubmitError(errorMessage(err, 'Could not create the card'))
     } finally {
-      setLoading(false);
+      setProgress(null)
     }
-  };
+  }
 
-  const fetchCategories = useCallback(async () => {
+  const removeCard = async () => {
+    setRemoveBusy(true)
     try {
-      const { data } = await axios.get(`${API_BASE_URL}/fetchcat`);
-      setCategory(data);
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      setError('Failed to load categories');
+      await api.post('/removecards', { cardId: removing._id })
+      setCards((list) => list.filter((c) => c._id !== removing._id))
+      toast.success('Card removed')
+      setRemoving(null)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setRemoveBusy(false)
     }
-  }, []);
+  }
 
-  const fetchCards = useCallback(async () => {
-    try {
-      const { data } = await axios.get(`${API_BASE_URL}/fetchcards`);
-      setCards(data);
-    } catch (error) {
-      console.error('Error fetching cards:', error);
-      setError('Failed to load cards');
-    }
-  }, []);
-
-  const removeCard = async (cardId) => {
-    if (!window.confirm('Are you sure you want to remove this card?')) {
-      return;
-    }
-
-    try {
-      await axios.post(`${API_BASE_URL}/removecards`, { cardId });
-      setCards(cards.filter((card) => card._id !== cardId));
-    } catch (error) {
-      console.error('Error removing card:', error);
-      setError('Failed to remove card. Please try again.');
-    }
-  };
-
-  const handleImageChange = (event) => {
-    const file = event.currentTarget.files[0];
-    formik.setFieldValue('image', file);
-
-    if (file) {
-      // Validate file size (5MB limit)
-      if (file.size > 5 * 1024 * 1024) {
-        formik.setFieldError('image', 'File size must be less than 5MB');
-        return;
-      }
-
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        formik.setFieldError('image', 'Please select a valid image file');
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        formik.setFieldValue('imagePreview', reader.result);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      formik.setFieldValue('imagePreview', '');
-    }
-  };
-
-  const handleCategorySelect = (categoryName) => {
-    formik.setFieldValue('title', categoryName);
-    setShowCategory(false);
-  };
-
-  useEffect(() => {
-    fetchCards();
-    fetchCategories();
-  }, [fetchCards, fetchCategories]);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (showCategory && !event.target.closest('.category-dropdown')) {
-        setShowCategory(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showCategory]);
+  const uploading = progress !== null
 
   return (
-    <Scrollbar style={{ width: "100vw", height: '100vh', background:"gray",  }}>
-    <div className="flex w-full min-h-screen">
-      {/* Sidebar */}
-      <div className="bg-stone-950 text-xl min-h-screen w-80 pt-10 border-r border-white/20 flex-shrink-0">
-        <nav className="fixed w-80">
-          <Link to="/home" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer transition-colors flex items-center text-white">
-              <HiOutlineArrowLeftStartOnRectangle  className="mr-3" />
-              Home
+    <>
+      <AdminHeader title="Explore cards" description="Cards appear on the Explore page and open pins from their category." />
+
+      <form onSubmit={submit} noValidate className="mb-10 grid gap-6 rounded-3xl border border-line p-4 sm:p-6 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+        <div>
+          <span className="mb-1.5 block text-sm font-semibold">
+            Cover image <span className="text-danger" aria-hidden="true">*</span>
+          </span>
+          {preview ? (
+            <div className="relative overflow-hidden rounded-2xl bg-surface">
+              <img src={preview} alt="Selected cover preview" className="aspect-[4/3] w-full object-cover" />
+              <IconButton label="Remove image" variant="overlay" size="sm" onClick={clearFile} className="absolute top-2 right-2" disabled={uploading}>
+                <IoClose />
+              </IconButton>
             </div>
-          </Link>
-          <Link to="/admin" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer transition-colors text-white">
-              Posts
-            </div>
-          </Link>
-          <Link to="/admin/userlist" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer transition-colors text-white">
-              User List
-            </div>
-          </Link>
-          <Link to="/admin/explore" className="block">
-            <div className="pl-20 p-5 font-bold bg-blue-200/20 cursor-pointer text-white">
-              Explore
-            </div>
-          </Link>
-          <Link to="/admin/tags" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer transition-colors text-white">
-              Tags
-            </div>
-          </Link>
-        </nav>
-      </div>
+          ) : (
+            <label
+              htmlFor={fileInputId}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragging(true)
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragging(false)
+                pickFile(e.dataTransfer.files?.[0])
+              }}
+              className={`flex aspect-[4/3] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-4 text-center transition-colors ${
+                dragging ? 'border-ink bg-surface' : 'border-line bg-surface/50 hover:border-ink-subtle'
+              } ${errors.image ? 'border-danger' : ''}`}
+            >
+              <IoImageOutline className="text-3xl text-ink-subtle" aria-hidden="true" />
+              <span className="text-sm font-semibold">Drag an image here or click to browse</span>
+              <span className="text-xs text-ink-subtle">JPEG, PNG, WebP, GIF or AVIF, up to 5MB</span>
+            </label>
+          )}
+          <input
+            ref={fileRef}
+            id={fileInputId}
+            type="file"
+            accept={TYPES.join(',')}
+            className="sr-only"
+            onChange={(e) => pickFile(e.target.files?.[0])}
+            aria-invalid={errors.image ? true : undefined}
+          />
+          {errors.image && <p className="mt-1.5 text-xs font-semibold text-danger">{errors.image}</p>}
+        </div>
 
-      {/* Main Content */}
-      <div className="flex-1 bg-neutral-950 overflow-auto">
-        <div className="w-full min-h-screen py-10 px-4">
-          {/* Form Section */}
-          <div className="flex items-center justify-center mb-10">
-            <div className="bg-neutral-900 w-full max-w-2xl p-8 rounded-xl shadow-lg">
-              <h2 className="text-3xl font-bold text-center text-gray-100 mb-8">
-                Create Explore Card
-              </h2>
-              
-              {error && (
-                <div className="bg-red-500/20 border border-red-500 text-red-100 px-4 py-3 rounded mb-6">
-                  {error}
-                </div>
-              )}
-
-              <form onSubmit={formik.handleSubmit} className="space-y-6">
-                {/* Image Upload */}
-                <div>
-                  <label className="block text-gray-100 font-medium mb-3">
-                    Upload Image *
-                  </label>
-                  <input
-                    type="file"
-                    name="image"
-                    accept="image/*"
-                    className="block w-full text-sm text-gray-100 file:mr-4 file:py-3 file:px-6 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 file:cursor-pointer cursor-pointer border border-gray-600 rounded-lg bg-neutral-800"
-                    onChange={handleImageChange}
-                  />
-                  {formik.errors.image && (
-                    <p className="text-red-400 text-sm mt-2">{formik.errors.image}</p>
-                  )}
-                  {formik.values.imagePreview && (
-                    <div className="mt-4 relative">
-                      <img
-                        src={formik.values.imagePreview}
-                        alt="Preview"
-                        className="rounded-lg w-full max-h-64 object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          formik.setFieldValue('image', '');
-                          formik.setFieldValue('imagePreview', '');
-                        }}
-                        className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 transition-colors"
-                      >
-                        <IoCloseSharp size={16} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Category Dropdown */}
-                <div className="relative category-dropdown">
-                  <label className="block text-gray-100 font-medium mb-3">
-                    Category *
-                  </label>
-                  <div
-                    onClick={() => setShowCategory(!showCategory)}
-                    className="cursor-pointer bg-neutral-800 border border-gray-600 rounded-lg h-12 px-4 flex justify-between items-center text-gray-100 hover:border-gray-500 transition-colors"
-                  >
-                    <input
-                      type="text"
-                      name="title"
-                      value={selectCat}
-                      onChange={formik.handleChange}
-                      placeholder="Select or type category"
-                      className="w-full bg-transparent focus:outline-none cursor-pointer text-gray-100 placeholder-gray-400"
-                      readOnly={showCategory}
-                    />
-                    <FaChevronDown className={`transition-transform ${showCategory ? 'rotate-180' : ''}`} />
-                  </div>
-                  {formik.errors.title && (
-                    <p className="text-red-400 text-sm mt-2">{formik.errors.title}</p>
-                  )}
-
-                  {showCategory && (
-                    <div className="absolute z-20 bg-neutral-800 border border-gray-600 rounded-lg mt-2 max-h-60 overflow-y-auto w-full shadow-xl">
-                      {category.length > 0 ? (
-                        category.map((cat, index) => (
-                          <div
-                            key={cat._id || index}
-                            onClick={() => {handleCategorySelect(cat.category),setSelectCat(cat.category)}}
-                            className="p-3 hover:bg-neutral-700 cursor-pointer text-gray-100 border-b border-gray-700 last:border-b-0 transition-colors"
-                          >
-                            {cat.category}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="p-3 text-gray-400">No categories available</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Description */}
-                <div>
-                  <label className="block text-gray-100 font-medium mb-3">
-                    Description *
-                  </label>
-                  <textarea
-                    name="subtitle"
-                    placeholder="Write a short description..."
-                    rows={4}
-                    onChange={formik.handleChange}
-                    value={formik.values.subtitle}
-                    className="w-full p-4 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-neutral-800 text-gray-100 placeholder-gray-400 resize-vertical"
-                  />
-                  {formik.errors.subtitle && (
-                    <p className="text-red-400 text-sm mt-2">{formik.errors.subtitle}</p>
-                  )}
-                </div>
-
-                {/* Submit Button */}
-                <div className="text-center pt-4">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="px-8 py-3 !bg-blue-600 hover:!bg-blue-700 disabled:!bg-blue-600/50 text-white rounded-lg font-semibold transition-colors min-w-32"
-                  >
-                    {loading ? 'Uploading...' : 'Create Card'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          {/* Cards Grid */}
-          <div className="px-4">
-            <h3 className="text-2xl font-bold text-gray-100 mb-6">
-              Explore Cards ({cards.length})
-            </h3>
-            
-            {cards.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-gray-400 text-lg">No explore cards yet</p>
-                <p className="text-gray-500">Create your first card using the form above</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                {cards.map((card, index) => (
-                  <div
-                    key={card._id || index}
-                    className="relative bg-neutral-900 rounded-lg shadow-lg overflow-hidden border border-gray-700 hover:border-gray-600 transition-all duration-200 group"
-                  >
-                    <div className="aspect-square relative overflow-hidden">
-                      <img
-                        src={card.image}
-                        alt={card.title || `Card ${index + 1}`}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        onError={(e) => {
-                          e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iIzMzMzMzMyIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZSBOb3QgRm91bmQ8L3RleHQ+Cjwvc3ZnPg==';
-                        }}
-                      />
-                      <button
-                        onClick={() => removeCard(card._id)}
-                        className="absolute top-2 right-2 !bg-white hover:!bg-gray-200 text-black !rounded-full !p-1 shadow/100 opacity-0 group-hover:opacity-100 transition-all duration-200 backdrop-blur-sm"
-                        title="Remove card"
-                      >
-                        <IoCloseSharp size={16} />
-                      </button>
-                    </div>
-                    
-                    <div className="p-4">
-                      <h4 className="font-semibold text-gray-100 truncate mb-1">
-                        {card.title}
-                      </h4>
-                      <p className="text-sm text-gray-400 line-clamp-2">
-                        {card.subtitle}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        <div className="flex flex-col gap-4">
+          <div>
+            <label htmlFor={selectId} className="mb-1.5 block text-sm font-semibold">
+              Category <span className="text-danger" aria-hidden="true">*</span>
+            </label>
+            <select
+              id={selectId}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              aria-invalid={errors.title ? true : undefined}
+              className="h-12 w-full cursor-pointer rounded-2xl border border-line bg-white px-4 text-sm focus:border-ink focus:ring-2 focus:ring-ink/10 focus:outline-none aria-[invalid=true]:border-danger"
+            >
+              <option value="">Choose a category</option>
+              {categories.map((c) => (
+                <option key={c._id} value={c.category}>
+                  {c.category}
+                </option>
+              ))}
+            </select>
+            {errors.title && <p className="mt-1.5 text-xs font-semibold text-danger">{errors.title}</p>}
+            {categoriesError && <p className="mt-1.5 text-xs font-semibold text-danger">{categoriesError}</p>}
+            {!categoriesError && categories.length === 0 && (
+              <p className="mt-1.5 text-xs text-ink-subtle">Create a category on the Categories &amp; tags page first.</p>
             )}
           </div>
+
+          <TextField
+            label="Description"
+            required
+            multiline
+            maxLength={200}
+            value={subtitle}
+            onChange={(e) => setSubtitle(e.target.value)}
+            placeholder="A short line shown on the card"
+            hint={`${subtitle.length}/200`}
+            error={errors.subtitle}
+          />
+
+          {submitError && <Alert>{submitError}</Alert>}
+
+          {uploading && (
+            <div>
+              <div className="h-2 overflow-hidden rounded-full bg-surface" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+                <div className="h-full rounded-full bg-brand-600 transition-[width]" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-ink-muted">{progress < 100 ? `Uploading… ${progress}%` : 'Processing…'}</p>
+            </div>
+          )}
+
+          <div className="mt-auto flex justify-end">
+            <Button type="submit" loading={uploading}>
+              Create card
+            </Button>
+          </div>
         </div>
-      </div>
-    </div>
-    </Scrollbar>
-  );
+      </form>
+
+      <h2 className="mb-4 text-lg font-bold">
+        Current cards {cardsStatus === 'ready' && <span className="text-ink-subtle">({cards.length})</span>}
+      </h2>
+
+      {cardsStatus === 'loading' && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading cards">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="skeleton aspect-[4/3] rounded-3xl" />
+          ))}
+        </div>
+      )}
+      {cardsStatus === 'error' && (
+        <EmptyState
+          icon={<IoAlertCircleOutline />}
+          title="We couldn't load cards"
+          description={cardsError}
+          action={<Button variant="secondary" onClick={() => loadCards()}>Try again</Button>}
+        />
+      )}
+      {cardsStatus === 'ready' && cards.length === 0 && (
+        <EmptyState icon={<IoImagesOutline />} title="No explore cards yet" description="Create your first card with the form above." />
+      )}
+      {cardsStatus === 'ready' && cards.length > 0 && (
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {cards.map((card) => (
+            <li key={card._id} className="relative overflow-hidden rounded-3xl bg-surface">
+              <img src={imageUrl(card.image, 600)} alt="" loading="lazy" className="aspect-[4/3] w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" aria-hidden="true" />
+              <div className="absolute inset-x-0 bottom-0 p-4 text-white">
+                <p className="text-xs font-medium opacity-90">{card.subtitle}</p>
+                <p className="text-xl font-extrabold tracking-tight">{card.title}</p>
+              </div>
+              <IconButton label={`Remove ${card.title} card`} variant="overlay" size="sm" onClick={() => setRemoving(card)} className="absolute top-3 right-3">
+                <FiTrash2 />
+              </IconButton>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ConfirmDialog
+        open={Boolean(removing)}
+        onClose={() => setRemoving(null)}
+        onConfirm={removeCard}
+        loading={removeBusy}
+        title="Remove this card?"
+        description={`The “${removing?.title ?? ''}” card will disappear from Explore. Pins in the category are not affected.`}
+        confirmLabel="Remove"
+      />
+    </>
+  )
 }

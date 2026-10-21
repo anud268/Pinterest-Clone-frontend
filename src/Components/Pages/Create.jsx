@@ -1,519 +1,415 @@
-import React, { useState, useCallback, useEffect } from "react";
-import Navbar from "../Part/Navbar";
-import Sidebar from "../Part/Sidebar";
+import { useEffect, useRef, useState } from "react";
 import { useFormik } from "formik";
-import axios from "axios";
+import * as yup from "yup";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate, useLocation } from "react-router-dom";
-import { showSidebar } from "../Redex/Slice/navbarSlice";
-import { IoCloseSharp, IoImageOutline } from "react-icons/io5";
-import { FiMapPin, FiLink, FiTag } from "react-icons/fi";
-import Scrollbar from "react-scrollbars-custom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { IoCloseSharp, IoCloudUploadOutline, IoLockClosedOutline } from "react-icons/io5";
+import { FiLink, FiMapPin, FiTag } from "react-icons/fi";
+import { api, errorMessage } from "../../lib/api";
+import { toast } from "../../lib/toast";
+import { useDebouncedValue, useDocumentTitle } from "../../lib/hooks";
+import { selectUser } from "../Redex/Slice/UserSlice";
+import { feedReset } from "../Redex/Slice/PostSlice";
+import Button from "../UI/Button";
+import { buttonClass } from "../UI/buttonClass";
+import { Alert, TextField } from "../UI/Field";
+import EmptyState from "../UI/EmptyState";
+import { PageSpinner } from "../UI/Spinner";
 
-const API_BASE_URL = "http://localhost:3500";
+const MAX_BYTES = 5 * 1024 * 1024;
+const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"];
+const MAX_TAGS = 10;
 
-export default function Create() {
-  const [selectedTags, setSelectedTags] = useState([]);
-  const [availableTags, setAvailableTags] = useState([]);
-  const [tagInput, setTagInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+const schema = yup.object({
+  title: yup.string().trim().required("Give your pin a title").max(100, "Keep the title under 100 characters"),
+  description: yup.string().trim().required("Add a short description").max(1000, "Keep the description under 1000 characters"),
+  url: yup
+    .string()
+    .trim()
+    .test("url", "Enter a full link starting with http:// or https://", (value) => !value || /^https?:\/\/\S+\.\S+/.test(value)),
+  location: yup.string().trim().max(100, "Keep the location under 100 characters"),
+});
 
-  const navigate = useNavigate();
-  const dispatch = useDispatch();
-  const user = useSelector((state) => state.user);
-  const pic = useSelector((state) => state.pic);
-  const userId = user._id;
+const validateFile = (file) => {
+  if (!ACCEPTED.includes(file.type)) return "Please choose a JPEG, PNG, WebP, GIF or AVIF image.";
+  if (file.size > MAX_BYTES) return "Images must be 5MB or smaller.";
+  return null;
+};
 
-  const location = useLocation();
-  const isEditMode = Boolean(location.state?._id);
-  const postId = location.state?._id;
+// "summer vibes" -> "#summer_vibes"
+const toTag = (value) => {
+  const cleaned = value.trim().replace(/^#+/, "").replace(/\s+/g, "_").replace(/[^\w]/g, "").slice(0, 40);
+  return cleaned ? `#${cleaned}` : null;
+};
+
+function TagInput({ tags, onChange, disabled }) {
+  const [input, setInput] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const debounced = useDebouncedValue(input.trim().replace(/^#/, ""), 250);
 
   useEffect(() => {
-    if (isEditMode && location.state?.tags) {
-      setSelectedTags(location.state.tags);
+    if (!debounced) {
+      setSuggestions([]);
+      return;
     }
-  }, [isEditMode, location.state]);
+    const controller = new AbortController();
+    api
+      .get(`/applytag/${encodeURIComponent(debounced)}`, { signal: controller.signal })
+      .then(({ data }) => setSuggestions(data.tags))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [debounced]);
+
+  const add = (value) => {
+    const tag = toTag(value);
+    if (!tag || tags.includes(tag) || tags.length >= MAX_TAGS) return;
+    onChange([...tags, tag]);
+    setInput("");
+    setSuggestions([]);
+  };
+
+  const visibleSuggestions = suggestions.filter((s) => !tags.includes(s)).slice(0, 6);
+
+  return (
+    <div>
+      <label htmlFor="tag-input" className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+        <FiTag aria-hidden="true" /> Tags <span className="font-normal text-ink-subtle">({tags.length}/{MAX_TAGS})</span>
+      </label>
+      <div className="flex min-h-12 flex-wrap items-center gap-1.5 rounded-2xl border border-line bg-white p-1.5 focus-within:border-ink focus-within:ring-2 focus-within:ring-ink/10">
+        {tags.map((tag) => (
+          <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-surface py-1 pr-1 pl-3 text-sm font-semibold">
+            {tag}
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => onChange(tags.filter((t) => t !== tag))}
+                aria-label={`Remove tag ${tag}`}
+                className="rounded-full p-1 text-ink-muted hover:bg-surface-strong hover:text-ink cursor-pointer"
+              >
+                <IoCloseSharp aria-hidden="true" />
+              </button>
+            )}
+          </span>
+        ))}
+        <input
+          id="tag-input"
+          type="text"
+          value={input}
+          disabled={disabled || tags.length >= MAX_TAGS}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === ",") && input.trim()) {
+              e.preventDefault();
+              add(input);
+            } else if (e.key === "Backspace" && !input && tags.length) {
+              onChange(tags.slice(0, -1));
+            }
+          }}
+          placeholder={tags.length >= MAX_TAGS ? "Tag limit reached" : "Type a tag and press Enter"}
+          aria-describedby="tag-hint"
+          className="h-9 min-w-40 flex-1 bg-transparent px-2 text-sm placeholder:text-ink-subtle focus:outline-none"
+        />
+      </div>
+      <p id="tag-hint" className="mt-1.5 text-xs text-ink-subtle">
+        Tags help people find your pin. Letters, numbers and underscores only.
+      </p>
+      {visibleSuggestions.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Suggested tags">
+          {visibleSuggestions.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => add(tag)}
+              className="rounded-full border border-line px-3 py-1 text-sm font-semibold text-ink-muted hover:border-ink hover:text-ink cursor-pointer"
+            >
+              + {tag}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImageDrop({ preview, onFile, onClear, error, disabled }) {
+  const inputRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+
+  const handleFiles = (files) => {
+    const file = files?.[0];
+    if (file) onFile(file);
+  };
+
+  if (preview) {
+    return (
+      <div className="relative overflow-hidden rounded-3xl bg-surface">
+        <img src={preview} alt="Selected pin image" className="max-h-[70vh] w-full object-contain" />
+        {!disabled && (
+          <div className="absolute top-3 right-3 flex gap-2">
+            <Button variant="overlay" size="sm" onClick={() => inputRef.current?.click()}>
+              Replace
+            </Button>
+            <button
+              type="button"
+              onClick={onClear}
+              aria-label="Remove image"
+              className="flex size-8 items-center justify-center rounded-full bg-white/90 text-ink shadow-card hover:bg-white cursor-pointer"
+            >
+              <IoCloseSharp aria-hidden="true" />
+            </button>
+          </div>
+        )}
+        <input ref={inputRef} type="file" accept={ACCEPTED.join(",")} className="sr-only" tabIndex={-1} onChange={(e) => handleFiles(e.target.files)} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label
+        htmlFor="image-upload"
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!disabled) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (!disabled) handleFiles(e.dataTransfer.files);
+        }}
+        className={`flex aspect-[3/4] max-h-[70vh] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed px-6 text-center transition-colors ${
+          dragging ? "border-brand-600 bg-brand-50" : error ? "border-danger bg-brand-50/40" : "border-line bg-surface hover:border-ink-subtle"
+        } ${disabled ? "pointer-events-none opacity-60" : ""}`}
+      >
+        <span className="flex size-14 items-center justify-center rounded-full bg-white text-2xl text-ink shadow-card" aria-hidden="true">
+          <IoCloudUploadOutline />
+        </span>
+        <span className="text-base font-bold">Choose a file or drag it here</span>
+        <span className="text-sm text-ink-muted">High-quality JPG, PNG, WebP or GIF up to 5MB. Tall images look best.</span>
+      </label>
+      <input
+        ref={inputRef}
+        id="image-upload"
+        type="file"
+        accept={ACCEPTED.join(",")}
+        disabled={disabled}
+        className="sr-only"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? "image-error" : undefined}
+        onChange={(e) => handleFiles(e.target.files)}
+      />
+      {error && (
+        <p id="image-error" className="mt-2 text-xs font-semibold text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PinForm({ existing }) {
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const user = useSelector(selectUser);
+  const isEdit = Boolean(existing);
+  const blocked = Boolean(user?.adminblock);
+
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(existing?.postImage || "");
+  const [imageError, setImageError] = useState(null);
+  const [tags, setTags] = useState(existing?.tags || []);
+  const [progress, setProgress] = useState(null);
+  const [submitError, setSubmitError] = useState(null);
+
+  // Release the object URL created for local previews
+  useEffect(() => () => preview.startsWith("blob:") && URL.revokeObjectURL(preview), [preview]);
+
+  const chooseFile = (next) => {
+    const problem = validateFile(next);
+    if (problem) return setImageError(problem);
+    setImageError(null);
+    setFile(next);
+    setPreview(URL.createObjectURL(next));
+  };
 
   const formik = useFormik({
     initialValues: {
-      image: "",
-      title: location.state?.postTitle || "",
-      description: location.state?.postDescription || "",
-      url: location.state?.url || "",
-      location: location.state?.location || "",
-      imagePreview: location.state?.postImage || "",
+      title: existing?.postTitle || "",
+      description: existing?.postDescription || "",
+      url: existing?.url || "",
+      location: existing?.location || "",
     },
-    enableReinitialize: true,
-    validate: (values) => {
-      const errors = {};
-      if (!values.title.trim()) errors.title = "Title is required";
-      if (!values.description.trim()) errors.description = "Description is required";
-      if (values.url && !isValidUrl(values.url)) {
-        errors.url = "Please enter a valid URL";
-      }
-      if (!values.image && !values.imagePreview) {
-        errors.image = "Image is required";
-      }
-      return errors;
-    },
-    onSubmit: (values) => {
-      if (isEditMode) {
-        handleUpdate(values, postId);
-      } else {
-        handleUpload(values, userId);
+    validationSchema: schema,
+    onSubmit: async (values) => {
+      if (!file && !isEdit) return setImageError("Add an image for your pin.");
+      setSubmitError(null);
+      const form = new FormData();
+      if (file) form.append("image", file);
+      Object.entries(values).forEach(([key, value]) => form.append(key, value.trim()));
+      tags.forEach((tag) => form.append("tags", tag));
+
+      try {
+        setProgress(0);
+        const { data } = await api.post(isEdit ? `/update/${existing._id}` : "/upload", form, {
+          onUploadProgress: (e) => e.total && setProgress(Math.round((e.loaded / e.total) * 100)),
+        });
+        dispatch(feedReset());
+        toast.success(isEdit ? "Your pin was updated" : "Your pin is live!");
+        navigate(`/post/${data.post._id}`, { replace: isEdit });
+      } catch (error) {
+        setSubmitError(errorMessage(error, "We couldn't publish your pin. Please try again."));
+      } finally {
+        setProgress(null);
       }
     },
   });
 
-  const isValidUrl = (string) => {
-    try {
-      new URL(string);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  };
-
-  // CREATE POST
-  const handleUpload = async (values, userId) => {
-    try {
-      setLoading(true);
-      setError("");
-
-      const formData = new FormData();
-      formData.append("image", values.image);
-      formData.append("title", values.title);
-      formData.append("description", values.description);
-      formData.append("url", values.url);
-      formData.append("location", values.location);
-      formData.append("tags", selectedTags);
-      formData.append("userId", userId);
-
-      const { data } = await axios.post(`${API_BASE_URL}/upload`, formData);
-
-      if (data.success) {
-        navigate("/home");
-      } else {
-        setError("Failed to create post. Please try again.");
-      }
-    } catch (error) {
-      console.error("Upload error:", error);
-      setError("An error occurred while creating your post.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // UPDATE POST
-  const handleUpdate = async (values, postId) => {
-    try {
-      setLoading(true);
-      setError("");
-
-      const formData = new FormData();
-      formData.append("title", values.title);
-      formData.append("description", values.description);
-      formData.append("url", values.url);
-      formData.append("location", values.location);
-      formData.append("tags", selectedTags);
-      if (values.image) {
-        formData.append("image", values.image);
-      }
-
-      const { data } = await axios.post(`${API_BASE_URL}/update/${postId}`, formData);
-
-      if (data.success) {
-        navigate("/home");
-      } else {
-        setError("Failed to update post.");
-      }
-    } catch (error) {
-      console.error("Update error:", error);
-      setError("An error occurred while updating your post.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // TAG SEARCH
-  const fetchTags = useCallback(
-    async (searchValue) => {
-      if (!searchValue.trim()) {
-        setAvailableTags([]);
-        return;
-      }
-      try {
-        const { data } = await axios.get(`${API_BASE_URL}/applytag/${searchValue}`);
-        const matchedTags = [];
-        data.forEach((doc) => {
-          doc.tags.forEach((tag) => {
-            if (
-              tag.toLowerCase().includes(searchValue.toLowerCase()) &&
-              !selectedTags.includes(tag)
-            ) {
-              matchedTags.push(tag);
-            }
-          });
-        });
-        const uniqueMatchedTags = [...new Set(matchedTags)];
-        setAvailableTags(uniqueMatchedTags);
-      } catch (error) {
-        console.error("Error fetching tags:", error);
-      }
-    },
-    [selectedTags]
-  );
-
-  const handleTagInputChange = (e) => {
-    const value = e.target.value;
-    setTagInput(value);
-    fetchTags(value);
-  };
-
-  const addTag = (tag) => {
-    if (!selectedTags.includes(tag)) {
-      setSelectedTags([...selectedTags, tag]);
-      setTagInput("");
-      setAvailableTags([]);
-    }
-  };
-
-  const removeTag = (tagToRemove) => {
-    setSelectedTags(selectedTags.filter((tag) => tag !== tagToRemove));
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter" && tagInput.trim()) {
-      e.preventDefault();
-      addTag(tagInput.trim());
-    }
-  };
-
-  const handleImageChange = (event) => {
-    const file = event.currentTarget.files[0];
-    formik.setFieldValue("image", file);
-
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        formik.setFieldError("image", "File size must be less than 5MB");
-        return;
-      }
-      if (!file.type.startsWith("image/")) {
-        formik.setFieldError("image", "Please select a valid image file");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        formik.setFieldValue("imagePreview", reader.result);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      formik.setFieldValue("imagePreview", "");
-    }
-  };
-
-  const clearForm = () => {
-    formik.resetForm();
-    setSelectedTags([]);
-    setTagInput("");
-    setAvailableTags([]);
-    setError("");
-  };
-
-  const isBlocked = user.adminblock === true;
-  const defaultUserImage = "/assets/a4121c3d85669215955a4723cd8ca.jpg";
+  const fieldProps = (name) => ({
+    name,
+    value: formik.values[name],
+    onChange: formik.handleChange,
+    onBlur: formik.handleBlur,
+    error: formik.touched[name] && formik.errors[name],
+    disabled: blocked || formik.isSubmitting,
+  });
 
   return (
-    <Scrollbar style={{ width: "100vw", height: '100vh' }}>
-      <div onClick={() => dispatch(showSidebar(false))} className="w-full min-h-screen bg-neutral-50/50">
-        <div className="flex max-w-7xl mx-auto pl-16 sm:pl-20 pr-4 sm:pr-8 py-8">
-          <div className="fixed top-0 left-0 z-20">
-            <Sidebar section='create' />
-          </div>
-
-          <div className="flex-1 max-w-4xl mx-auto py-6">
-            <div className="bg-white border border-neutral-200/60 shadow-md rounded-3xl overflow-hidden">
-
-              {/* Header Panel */}
-              <div className="border-b border-neutral-100 px-8 py-5 flex items-center justify-between bg-white">
-                <h1 className="text-xl font-bold text-neutral-800 tracking-tight">
-                  {isEditMode ? "Edit Pin" : "Create Pin"}
-                </h1>
-                {isBlocked && (
-                  <span className="text-xs font-semibold bg-red-100 text-red-700 px-3.5 py-1.5 rounded-full border border-red-200">
-                    Account Blocked
-                  </span>
-                )}
-              </div>
-
-              {error && (
-                <div className="mx-8 mt-6 bg-red-50/60 border border-red-200 text-red-700 px-4 py-3.5 rounded-2xl text-sm flex items-center justify-between">
-                  <span>{error}</span>
-                  <button
-                    type="button"
-                    onClick={() => setError("")}
-                    className="text-xs font-bold text-red-600 hover:text-red-800 underline border-0 bg-transparent cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-
-              {isBlocked && (
-                <div className="mx-8 mt-6 bg-red-50 border border-red-200 text-red-700 p-4 rounded-2xl text-center text-sm font-semibold">
-                  Your account is blocked by the administrator. Creating new pins is disabled.
-                </div>
-              )}
-
-              <form onSubmit={formik.handleSubmit} className="p-8">
-                <div className="grid md:grid-cols-5 gap-8 items-start">
-
-                  {/* Left Column: Image Uploader (Covers 2 columns of the grid) */}
-                  <div className="md:col-span-2 space-y-4">
-                    <label className="block text-sm font-bold text-neutral-700">
-                      Pin Image <span className="text-red-500">*</span>
-                    </label>
-
-                    {(!isEditMode || !formik.values.imagePreview) && (
-                      <div className="relative">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          name="image"
-                          className="hidden"
-                          id="image-upload"
-                          onChange={handleImageChange}
-                          disabled={isBlocked}
-                        />
-                        <label
-                          htmlFor="image-upload"
-                          className="cursor-pointer flex flex-col items-center justify-center w-full h-[360px] border-2 border-dashed border-neutral-300 rounded-2xl hover:border-blue-500 hover:bg-neutral-50/80 transition-all duration-300 bg-neutral-50"
-                        >
-                          <div className="p-4 bg-white rounded-full shadow-sm mb-3 text-neutral-400 group-hover:scale-105 transition-transform duration-200">
-                            <IoImageOutline size={28} />
-                          </div>
-                          <span className="text-neutral-700 text-sm font-semibold">
-                            Choose a file
-                          </span>
-                          <span className="text-neutral-400 text-xs mt-1 text-center px-4 leading-relaxed">
-                            We recommend high-quality images under 5MB
-                          </span>
-                        </label>
-                      </div>
-                    )}
-
-                    {formik.values.imagePreview && (
-                      <div className="relative mt-2 rounded-2xl overflow-hidden shadow-sm border border-neutral-200 bg-neutral-100 group">
-                        <img
-                          src={formik.values.imagePreview}
-                          alt="Uploaded Pin Preview"
-                          className="w-full max-h-[360px] object-cover rounded-2xl animate-fade-in"
-                        />
-                        {!isBlocked && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              formik.setFieldValue("image", "");
-                              formik.setFieldValue("imagePreview", "");
-                            }}
-                            className="absolute top-3 right-3 p-2 bg-stone-900/80 hover:bg-stone-950 text-white rounded-full transition-colors shadow-md border-0 cursor-pointer"
-                            title="Remove image"
-                          >
-                            <IoCloseSharp size={18} />
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {formik.errors.image && (
-                      <p className="text-red-500 text-xs font-semibold mt-1.5">{formik.errors.image}</p>
-                    )}
-                  </div>
-
-                  {/* Right Column: Pin Details Form (Covers 3 columns of the grid) */}
-                  <div className="md:col-span-3 space-y-6">
-
-                    {/* Creator Info */}
-                    <div className="flex items-center gap-3 bg-neutral-50 border border-neutral-150 p-3 rounded-2xl">
-                      <img
-                        src={pic || defaultUserImage}
-                        alt={user.fullname}
-                        className="w-10 h-10 rounded-full object-cover border border-neutral-200"
-                        onError={(e) => { e.target.src = defaultUserImage }}
-                      />
-                      <div>
-                        <span className="block text-xs text-neutral-400 font-bold uppercase tracking-wider">Creator</span>
-                        <span className="block text-sm font-bold text-neutral-800 leading-tight">{user.fullname}</span>
-                      </div>
-                    </div>
-
-                    {/* Pin Title */}
-                    <div>
-                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
-                        Title <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="title"
-                        placeholder="Add your title"
-                        onChange={formik.handleChange}
-                        value={formik.values.title}
-                        disabled={isBlocked}
-                        className="w-full border-b border-neutral-200 hover:border-neutral-300 focus:border-blue-600 pb-2.5 outline-none text-lg font-bold text-neutral-800 placeholder-neutral-300 transition-colors bg-transparent"
-                      />
-                      {formik.errors.title && (
-                        <p className="text-red-500 text-xs font-semibold mt-1">{formik.errors.title}</p>
-                      )}
-                    </div>
-
-                    {/* Pin Description */}
-                    <div>
-                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
-                        Description <span className="text-red-500">*</span>
-                      </label>
-                      <textarea
-                        name="description"
-                        placeholder="Tell everyone what your Pin is about"
-                        rows="3"
-                        onChange={formik.handleChange}
-                        value={formik.values.description}
-                        disabled={isBlocked}
-                        className="w-full border-b border-neutral-200 hover:border-neutral-300 focus:border-blue-600 pb-2 outline-none text-sm text-neutral-700 placeholder-neutral-300 transition-colors bg-transparent resize-none leading-relaxed"
-                      />
-                      {formik.errors.description && (
-                        <p className="text-red-500 text-xs font-semibold mt-1">{formik.errors.description}</p>
-                      )}
-                    </div>
-
-                    {/* Website Destination Link */}
-                    <div>
-                      <label className="flex items-center gap-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
-                        <FiLink size={12} />
-                        Destination Link
-                      </label>
-                      <input
-                        type="url"
-                        name="url"
-                        placeholder="Add a destination link (https://...)"
-                        onChange={formik.handleChange}
-                        value={formik.values.url}
-                        disabled={isBlocked}
-                        className="w-full border-b border-neutral-200 hover:border-neutral-300 focus:border-blue-600 pb-2 outline-none text-sm text-neutral-700 placeholder-neutral-300 transition-colors bg-transparent font-medium"
-                      />
-                      {formik.errors.url && (
-                        <p className="text-red-500 text-xs font-semibold mt-1">{formik.errors.url}</p>
-                      )}
-                    </div>
-
-                    {/* Tags Search & Selection */}
-                    <div>
-                      <label className="flex items-center gap-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
-                        <FiTag size={12} />
-                        Tags
-                      </label>
-
-                      {selectedTags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mb-3">
-                          {selectedTags.map((tag, index) => (
-                            <span
-                              key={index}
-                              className="inline-flex items-center gap-1 bg-blue-50 border border-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-semibold"
-                            >
-                              <span>{tag}</span>
-                              {!isBlocked && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeTag(tag)}
-                                  className="p-0.5 hover:bg-blue-100 text-blue-900 rounded-full border-0 bg-transparent cursor-pointer flex items-center justify-center"
-                                >
-                                  <IoCloseSharp size={12} />
-                                </button>
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="Search or add tags (Press Enter to add custom tag)"
-                          value={tagInput}
-                          onChange={handleTagInputChange}
-                          onKeyPress={handleKeyPress}
-                          disabled={isBlocked}
-                          className="w-full border-b border-neutral-200 hover:border-neutral-300 focus:border-blue-600 pb-2 outline-none text-sm text-neutral-700 placeholder-neutral-300 transition-colors bg-transparent"
-                        />
-                        {availableTags.length > 0 && (
-                          <div className="absolute z-10 w-full mt-2 bg-white border border-neutral-200 rounded-xl shadow-lg max-h-40 overflow-y-auto">
-                            {availableTags.map((tag, index) => (
-                              <button
-                                key={index}
-                                type="button"
-                                onClick={() => addTag(tag)}
-                                className="w-full text-left px-4 py-2.5 bg-white hover:bg-neutral-50 text-neutral-700 text-sm font-semibold transition-colors border-0 border-b border-neutral-100 last:border-b-0 cursor-pointer"
-                              >
-                                {tag}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Location Field */}
-                    <div>
-                      <label className="flex items-center gap-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
-                        <FiMapPin size={12} />
-                        Location
-                      </label>
-                      <input
-                        type="text"
-                        name="location"
-                        placeholder="Add a location"
-                        onChange={formik.handleChange}
-                        value={formik.values.location}
-                        disabled={isBlocked}
-                        className="w-full border-b border-neutral-200 hover:border-neutral-300 focus:border-blue-600 pb-2 outline-none text-sm text-neutral-700 placeholder-neutral-300 transition-colors bg-transparent"
-                      />
-                    </div>
-
-                  </div>
-                </div>
-
-                {/* Form Buttons Panel */}
-                <div className="flex justify-between items-center mt-10 pt-6 border-t border-neutral-100">
-                  <button
-                    type="button"
-                    onClick={clearForm}
-                    disabled={isBlocked}
-                    className="px-6 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-full font-semibold text-sm transition-all cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Clear Form
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loading || isBlocked}
-                    className={`px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-semibold text-sm shadow-sm hover:shadow transition-all min-w-32 border-0 cursor-pointer ${loading || isBlocked ? "opacity-50 cursor-not-allowed" : ""
-                      }`}
-                  >
-                    {loading
-                      ? isEditMode
-                        ? "Updating..."
-                        : "Posting..."
-                      : isEditMode
-                        ? "Update Pin"
-                        : "Create Pin"}
-                  </button>
-                </div>
-
-              </form>
-            </div>
-          </div>
-
+    <form onSubmit={formik.handleSubmit} noValidate className="mx-auto max-w-5xl">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">{isEdit ? "Edit pin" : "Create a pin"}</h1>
+          <p className="mt-1 text-sm text-ink-muted">{isEdit ? "Update the details of your pin." : "Share an idea with everyone."}</p>
+        </div>
+        <div className="flex gap-2">
+          {isEdit && (
+            <Link to={`/post/${existing._id}`} className={buttonClass({ variant: "secondary" })}>
+              Cancel
+            </Link>
+          )}
+          <Button type="submit" size="lg" loading={formik.isSubmitting} disabled={blocked}>
+            {isEdit ? "Save changes" : "Publish"}
+          </Button>
         </div>
       </div>
-    </Scrollbar>
+
+      {blocked && (
+        <Alert className="mb-6">Your account has been restricted by an administrator, so you can&apos;t create or edit pins.</Alert>
+      )}
+      {submitError && <Alert className="mb-6">{submitError}</Alert>}
+      {progress !== null && (
+        <div className="mb-6" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+          <div className="mb-1.5 flex justify-between text-xs font-semibold text-ink-muted">
+            <span>{progress < 100 ? "Uploading image…" : "Processing…"}</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-surface">
+            <div className="h-full rounded-full bg-brand-600 transition-[width] duration-200" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-8 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <ImageDrop
+          preview={preview}
+          onFile={chooseFile}
+          onClear={() => {
+            setFile(null);
+            setPreview(isEdit ? existing.postImage : "");
+          }}
+          error={imageError}
+          disabled={blocked || formik.isSubmitting}
+        />
+
+        <div className="flex flex-col gap-5">
+          <TextField label="Title" required maxLength={100} placeholder="Add a title" hint={`${formik.values.title.length}/100`} {...fieldProps("title")} />
+          <TextField
+            label="Description"
+            required
+            multiline
+            rows={4}
+            maxLength={1000}
+            placeholder="Tell everyone what your pin is about"
+            hint={`${formik.values.description.length}/1000`}
+            {...fieldProps("description")}
+          />
+          <TextField
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <FiLink aria-hidden="true" /> Destination link
+              </span>
+            }
+            type="url"
+            inputMode="url"
+            placeholder="https://example.com"
+            {...fieldProps("url")}
+          />
+          <TextField
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <FiMapPin aria-hidden="true" /> Location
+              </span>
+            }
+            maxLength={100}
+            placeholder="Add a place"
+            {...fieldProps("location")}
+          />
+          <TagInput tags={tags} onChange={setTags} disabled={blocked || formik.isSubmitting} />
+        </div>
+      </div>
+    </form>
   );
+}
+
+export default function Create() {
+  const [params] = useSearchParams();
+  const location = useLocation();
+  const user = useSelector(selectUser);
+  const editId = params.get("edit") || location.state?._id || null;
+  const [existing, setExisting] = useState(null);
+  const [status, setStatus] = useState(editId ? "loading" : "ready");
+  const [error, setError] = useState(null);
+  useDocumentTitle(editId ? "Edit pin" : "Create");
+
+  useEffect(() => {
+    if (!editId) {
+      setExisting(null);
+      setStatus("ready");
+      return;
+    }
+    const controller = new AbortController();
+    setStatus("loading");
+    api
+      .get(`/viewpost/${editId}`, { signal: controller.signal })
+      .then(({ data }) => {
+        setExisting(data.post);
+        setStatus("ready");
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(errorMessage(err, "We couldn't load this pin."));
+        setStatus("error");
+      });
+    return () => controller.abort();
+  }, [editId]);
+
+  if (status === "loading") return <PageSpinner label="Loading pin" />;
+  if (status === "error") {
+    return (
+      <EmptyState
+        title="We couldn't open this pin"
+        description={error}
+        action={
+          <Link to="/create" className={buttonClass({ variant: "secondary" })}>
+            Create a new pin instead
+          </Link>
+        }
+      />
+    );
+  }
+  if (existing && existing.userId?._id !== user?._id) {
+    return <EmptyState icon={<IoLockClosedOutline />} title="You can only edit your own pins" />;
+  }
+
+  return <PinForm key={existing?._id ?? "new"} existing={existing} />;
 }

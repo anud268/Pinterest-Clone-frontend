@@ -1,113 +1,123 @@
-import React, { useEffect, useState } from "react";
-import Settings from "../Pages/Settings";
-import { FaUser } from "react-icons/fa";
-import { Link } from "react-router-dom";
-import { useSelector } from "react-redux";
-import axios from "axios";
-import Scrollbar from "react-scrollbars-custom";
-
-// 🔹 Skeleton Loader for Blocked Users
-const BlockedUsersSkeleton = () => {
-  return (
-    <div className="p-2 w-full">
-      <table className="w-full">
-        <thead className="bg-gray-50 border-b border-gray-200">
-          <tr>
-            <th className="px-6 py-4 text-left text-xm font-semibold text-gray-600">
-              Blocked Users
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <tr key={index} className="animate-pulse">
-              <td className="px-6 py-4 flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-gray-300"></div>
-                <div className="h-4 w-40 bg-gray-300 rounded"></div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
+import { useCallback, useEffect, useState } from 'react'
+import { useSelector } from 'react-redux'
+import { Link } from 'react-router-dom'
+import { IoAlertCircleOutline } from 'react-icons/io5'
+import { MdBlock } from 'react-icons/md'
+import { api, errorMessage } from '../../lib/api'
+import { toast } from '../../lib/toast'
+import { useDocumentTitle } from '../../lib/hooks'
+import { selectUser } from '../Redex/Slice/UserSlice'
+import Avatar from '../UI/Avatar'
+import Button from '../UI/Button'
+import { ConfirmDialog } from '../UI/Dialog'
+import EmptyState from '../UI/EmptyState'
+import SettingsHeader from './SettingsHeader'
 
 export default function BlockedUsers() {
-  const [userDetials, setUserDetials] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const user = useSelector((state) => state.user);
+  useDocumentTitle('Blocked accounts')
+  const user = useSelector(selectUser)
+  const [users, setUsers] = useState([])
+  const [status, setStatus] = useState('loading')
+  const [error, setError] = useState(null)
+  const [pending, setPending] = useState(null)
+  const [unblocking, setUnblocking] = useState(false)
 
-  const fetchBlockedUsers = async () => {
+  const load = useCallback(async () => {
+    setStatus('loading')
     try {
-      const { data } = await axios.get(
-        `http://localhost:3500/blockedusers/${user._id}`
-      );
-      setUserDetials(data);
-    } catch (error) {
-      console.log(error);
-    } finally {
-      setLoading(false);
+      const { data } = await api.get(`/blockedusers/${user._id}`)
+      setUsers(data.users)
+      setStatus('ready')
+    } catch (err) {
+      setError(errorMessage(err, 'Could not load blocked accounts'))
+      setStatus('error')
     }
-  };
+  }, [user._id])
 
   useEffect(() => {
-    if (user && user._id) {
-      fetchBlockedUsers();
+    load()
+  }, [load])
+
+  const unblock = async () => {
+    setUnblocking(true)
+    try {
+      const { data } = await api.post('/userblock', { id: pending._id })
+      if (data.blocked === false) {
+        setUsers((list) => list.filter((u) => u._id !== pending._id))
+        toast.success(`${pending.fullname} is unblocked`)
+      }
+      setPending(null)
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not unblock this account'))
+    } finally {
+      setUnblocking(false)
     }
-  }, [user]);
+  }
+
+  let content
+  if (status === 'loading') {
+    content = (
+      <ul aria-busy="true" aria-label="Loading blocked accounts" className="divide-y divide-line">
+        {[0, 1, 2].map((i) => (
+          <li key={i} className="flex items-center gap-3 py-3">
+            <div className="skeleton size-10 rounded-full" />
+            <div className="skeleton h-4 w-40 rounded-full" />
+          </li>
+        ))}
+      </ul>
+    )
+  } else if (status === 'error') {
+    content = (
+      <EmptyState
+        icon={<IoAlertCircleOutline />}
+        title="We couldn't load blocked accounts"
+        description={error}
+        action={<Button variant="secondary" onClick={load}>Try again</Button>}
+      />
+    )
+  } else if (!users.length) {
+    content = (
+      <EmptyState
+        icon={<MdBlock />}
+        title="You haven't blocked anyone"
+        description="When you block someone from their profile, they'll show up here."
+      />
+    )
+  } else {
+    content = (
+      <ul className="divide-y divide-line rounded-3xl border border-line">
+        {users.map((blocked) => (
+          <li key={blocked._id} className="flex items-center gap-3 px-4 py-3">
+            <Link to={`/profile/${blocked._id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-full">
+              <Avatar src={blocked.image} name={blocked.fullname} size="md" />
+              <span className="truncate text-sm font-semibold text-ink hover:underline">{blocked.fullname}</span>
+            </Link>
+            <Button variant="secondary" size="sm" onClick={() => setPending(blocked)}>
+              Unblock
+            </Button>
+          </li>
+        ))}
+      </ul>
+    )
+  }
 
   return (
-    <Scrollbar style={{ width: "100vw", height: '100vh',  }}>
-    <div className="flex w-full">
-      <div className="w-[20%]">
-        <Settings page={"block"} />
-      </div>
-      <div className="w-[80%]">
-        <div className="p-2 align-center h-full w-full">
-          {loading ? (
-            <BlockedUsersSkeleton /> // 🔹 Show skeleton while loading
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xm font-semibold text-gray-600">
-                    Blocked Users
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="w-full divide-gray-200">
-                {userDetials.length > 0 ? (
-                  userDetials.map((user) => (
-                    <tr key={user._id} className="hover:bg-gray-100 transition">
-                      <td className="px-6 py-4 flex items-center gap-3">
-                        <Link
-                          to={`/profile/${user._id}`}
-                          className="text-lg font-semibold hover:underline flex items-center gap-3"
-                        >
-                          <div className="h-10 w-10 flex items-center justify-center bg-indigo-100 text-black rounded-full">
-                            <FaUser size={20} />
-                          </div>
-                          <span className="font-medium text-gray-800">
-                            {user.fullname}
-                          </span>
-                        </Link>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td className="px-6 py-4 text-gray-500 font-bold">
-                      No Blocked Users
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </div>
-    </Scrollbar>
-  );
+    <>
+      <SettingsHeader
+        title="Blocked accounts"
+        description="You won't see pins from people you've blocked. Unblock someone to see their pins again."
+      />
+      {content}
+      <ConfirmDialog
+        open={Boolean(pending)}
+        onClose={() => setPending(null)}
+        onConfirm={unblock}
+        loading={unblocking}
+        tone="primary"
+        confirmLabel="Unblock"
+        title={pending ? `Unblock ${pending.fullname}?` : 'Unblock?'}
+        description="Their pins will appear in your feed and search results again."
+      />
+    </>
+  )
 }

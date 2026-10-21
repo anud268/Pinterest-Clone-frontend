@@ -1,285 +1,211 @@
-import axios from 'axios';
-import React, { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { SlOptions } from 'react-icons/sl';
-import { GoHomeFill } from 'react-icons/go';
-import { HiOutlineArrowLeftStartOnRectangle, HiMagnifyingGlass } from 'react-icons/hi2';
-import { FiUsers, FiUserCheck, FiUserX } from 'react-icons/fi';
-import Scrollbar from 'react-scrollbars-custom';
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { IoAlertCircleOutline, IoSearch } from 'react-icons/io5'
+import { FiUsers } from 'react-icons/fi'
+import { api, errorMessage } from '../../lib/api'
+import { useDebouncedValue, useDocumentTitle } from '../../lib/hooks'
+import { toast } from '../../lib/toast'
+import Avatar from '../UI/Avatar'
+import Button from '../UI/Button'
+import { ConfirmDialog } from '../UI/Dialog'
+import EmptyState from '../UI/EmptyState'
+import { AdminHeader, StatChip } from './AdminLayout'
 
-const API_BASE_URL = 'http://localhost:3500';
+const formatDate = (value) => (value ? new Date(value).toLocaleDateString() : '—')
+
+const StatusBadge = ({ blocked }) => (
+  <span
+    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${
+      blocked ? 'bg-brand-50 text-brand-700' : 'bg-emerald-50 text-emerald-800'
+    }`}
+  >
+    <span className={`size-1.5 rounded-full ${blocked ? 'bg-danger' : 'bg-success'}`} aria-hidden="true" />
+    {blocked ? 'Blocked' : 'Active'}
+  </span>
+)
 
 export default function AdminUserlist() {
-  const [users, setUsers] = useState([]);
-  const [filteredUsers, setFilteredUsers] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [processingUserId, setProcessingUserId] = useState(null);
+  useDocumentTitle('Admin · Users')
+  const [users, setUsers] = useState([])
+  const [status, setStatus] = useState('loading')
+  const [error, setError] = useState(null)
+  const [search, setSearch] = useState('')
+  const [target, setTarget] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const query = useDebouncedValue(search.trim().toLowerCase(), 150)
 
-  const fetchUsers = useCallback(async () => {
+  const load = useCallback(async (signal) => {
+    setStatus('loading')
     try {
-      setLoading(true);
-      setError('');
-      const { data } = await axios.get(`${API_BASE_URL}/userlist`);
-      console.log('User list:', data);
-      setUsers(data);
-      setFilteredUsers(data);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      setError('Failed to load users. Please try again.');
-    } finally {
-      setLoading(false);
+      const { data } = await api.get('/userlist', { signal })
+      setUsers(data.users)
+      setStatus('ready')
+    } catch (err) {
+      if (signal?.aborted) return
+      setError(errorMessage(err))
+      setStatus('error')
     }
-  }, []);
-
-  const blockUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to change this user\'s status?')) {
-      return;
-    }
-
-    try {
-      setProcessingUserId(userId);
-      const { data } = await axios.post(`${API_BASE_URL}/adminblock`, { id: userId });
-      console.log('Block user response:', data);
-      
-      // Update the user's status in the state
-      const updatedUsers = users.map(user => 
-        user._id === userId 
-          ? { ...user, adminblock: !user.adminblock }
-          : user
-      );
-      
-      setUsers(updatedUsers);
-      setFilteredUsers(updatedUsers.filter(user => 
-        user.fullname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-      ));
-      
-    } catch (error) {
-      console.error('Error blocking/unblocking user:', error);
-      setError('Failed to update user status. Please try again.');
-    } finally {
-      setProcessingUserId(null);
-    }
-  };
-
-  const handleSearch = useCallback((term) => {
-    setSearchTerm(term);
-    if (!term.trim()) {
-      setFilteredUsers(users);
-    } else {
-      const filtered = users.filter(user => 
-        user.fullname.toLowerCase().includes(term.toLowerCase()) ||
-        user.email?.toLowerCase().includes(term.toLowerCase())
-      );
-      setFilteredUsers(filtered);
-    }
-  }, [users]);
+  }, [])
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
+  }, [load])
 
-  useEffect(() => {
-    handleSearch(searchTerm);
-  }, [searchTerm, handleSearch]);
+  const filtered = useMemo(
+    () =>
+      query
+        ? users.filter((u) => u.fullname?.toLowerCase().includes(query) || u.email?.toLowerCase().includes(query))
+        : users,
+    [users, query],
+  )
+  const blockedCount = users.filter((u) => u.adminblock).length
 
-  const blockedCount = users.filter(user => user.adminblock).length;
-  const activeCount = users.length - blockedCount;
+  const toggleBlock = async () => {
+    setSaving(true)
+    try {
+      const { data } = await api.post('/adminblock', { id: target._id })
+      setUsers((list) => list.map((u) => (u._id === target._id ? { ...u, adminblock: data.blocked } : u)))
+      toast.success(data.message)
+      setTarget(null)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const blockButton = (user) => (
+    <Button size="sm" variant={user.adminblock ? 'secondary' : 'outline'} onClick={() => setTarget(user)}>
+      {user.adminblock ? 'Unblock' : 'Block'}
+    </Button>
+  )
 
   return (
-    <Scrollbar style={{ width: "100vw", height: '100vh', background:"gray",  }}>
-    <div className="flex min-h-screen w-full bg-neutral-950">
-      {/* Sidebar */}
-      <div className="bg-stone-950 text-xl min-h-screen w-80 pt-10 border-r border-white/20 flex-shrink-0">
-        <nav className="fixed w-80">
-          <Link to="/home" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer flex items-center text-white transition-colors">
-              <HiOutlineArrowLeftStartOnRectangle className="mr-3" />
-              Home
-            </div>
-          </Link>
-          <Link to="/admin" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer text-white transition-colors">
-              Posts
-            </div>
-          </Link>
-          <Link to="/admin/userlist" className="block">
-            <div className="pl-20 p-5 font-bold bg-blue-200/20 cursor-pointer text-white">
-              User List
-            </div>
-          </Link>
-          <Link to="/admin/explore" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer text-white transition-colors">
-              Explore
-            </div>
-          </Link>
-          <Link to="/admin/tags" className="block">
-            <div className="pl-20 p-5 font-bold hover:bg-blue-200/10 cursor-pointer text-white transition-colors">
-              Tags
-            </div>
-          </Link>
-        </nav>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-6 overflow-auto ">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">User Management</h1>
-          <div className="flex flex-wrap gap-4 text-sm">
-            <div className="flex items-center gap-2 bg-green-500/20 text-green-400 px-3 py-1 rounded-full">
-              <FiUserCheck size={16} />
-              <span>{activeCount} Active</span>
-            </div>
-            <div className="flex items-center gap-2 bg-red-500/20 text-red-400 px-3 py-1 rounded-full">
-              <FiUserX size={16} />
-              <span>{blockedCount} Blocked</span>
-            </div>
-            <div className="flex items-center gap-2 bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full">
-              <FiUsers size={16} />
-              <span>{users.length} Total</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="relative max-w-md">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <HiMagnifyingGlass className="h-5 w-5 text-gray-400" />
-            </div>
-            <input
-              type="text"
-              placeholder="Search users by name or email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 bg-neutral-800 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-gray-400"
-            />
-          </div>
-        </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-500/20 border border-red-500 text-red-100 px-4 py-3 rounded-lg mb-6">
-            {error}
-            <button
-              onClick={() => setError('')}
-              className="ml-4 text-red-200 hover:text-white underline"
-            >
-              Dismiss
-            </button>
+    <>
+      <AdminHeader title="Users" description="Block accounts that break the rules. Blocked users can browse but can't post or save.">
+        {status === 'ready' && (
+          <div className="flex flex-wrap gap-2">
+            <StatChip label="active" value={users.length - blockedCount} tone="success" />
+            <StatChip label="blocked" value={blockedCount} tone="danger" />
+            <StatChip label="total" value={users.length} />
           </div>
         )}
+      </AdminHeader>
 
-        {/* Loading State */}
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span className="ml-3 text-gray-400">Loading users...</span>
-          </div>
-        ) : (
-          <>
-            {/* Users List */}
-            {filteredUsers.length === 0 ? (
-              <div className="text-center py-12">
-                <FiUsers className="mx-auto h-12 w-12 text-gray-500 mb-4" />
-                <p className="text-gray-400 text-lg">
-                  {searchTerm ? 'No users found matching your search' : 'No users found'}
-                </p>
-                {searchTerm && (
-                  <button
-                    onClick={() => setSearchTerm('')}
-                    className="mt-2 text-blue-400 hover:text-blue-300 underline"
-                  >
-                    Clear search
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {filteredUsers.map((user) => {
-                  const isBlocked = user.adminblock;
-                  const isProcessing = processingUserId === user._id;
-
-                  return (
-                    <div
-                      key={user._id}
-                      className={`border rounded-xl overflow-hidden shadow-lg transition-all duration-200 ${
-                        isBlocked 
-                          ? 'border-red-500/50 bg-red-500/10' 
-                          : 'border-gray-600 bg-neutral-800 hover:bg-neutral-700'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center px-6 py-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className={`w-3 h-3 rounded-full ${
-                              isBlocked ? 'bg-red-500' : 'bg-green-500'
-                            }`}></div>
-                            <h3 className="text-white text-lg font-semibold">
-                              {user.fullname}
-                            </h3>
-                            {isBlocked && (
-                              <span className="bg-red-500/20 text-red-400 text-xs px-2 py-1 rounded-full">
-                                BLOCKED
-                              </span>
-                            )}
-                          </div>
-                          {user.email && (
-                            <p className="text-gray-400 text-sm ml-6">
-                              {user.email}
-                            </p>
-                          )}
-                          {user.createdAt && (
-                            <p className="text-gray-500 text-xs ml-6 mt-1">
-                              Joined: {new Date(user.createdAt).toLocaleDateString()}
-                            </p>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => blockUser(user._id)}
-                            disabled={isProcessing}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 min-w-20 ${
-                              isBlocked
-                                ? 'bg-green-600 hover:bg-green-700 text-white'
-                                : 'bg-red-600 hover:bg-red-700 text-white'
-                            } disabled:opacity-50 disabled:cursor-not-allowed`}
-                          >
-                            {isProcessing ? (
-                              <div className="flex items-center justify-center">
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                              </div>
-                            ) : (
-                              isBlocked ? 'Unblock' : 'Block'
-                            )}
-                          </button>
-                          
-                          <button className="p-2 text-gray-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors">
-                            <SlOptions size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Results Summary */}
-            {filteredUsers.length > 0 && (
-              <div className="mt-6 text-center text-gray-400 text-sm">
-                Showing {filteredUsers.length} of {users.length} users
-                {searchTerm && ` matching "${searchTerm}"`}
-              </div>
-            )}
-          </>
-        )}
+      <div className="mb-5 max-w-md">
+        <label htmlFor="user-search" className="sr-only">
+          Search users
+        </label>
+        <div className="flex h-11 items-center rounded-full bg-surface pl-4 focus-within:ring-2 focus-within:ring-ink/15">
+          <IoSearch className="text-ink-subtle" aria-hidden="true" />
+          <input
+            id="user-search"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email"
+            className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm focus:outline-none"
+          />
+        </div>
       </div>
-    </div>
-    </Scrollbar>
-  );
+
+      {status === 'loading' && (
+        <div className="space-y-2" aria-busy="true" aria-label="Loading users">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="skeleton h-16 rounded-2xl" />
+          ))}
+        </div>
+      )}
+
+      {status === 'error' && (
+        <EmptyState
+          icon={<IoAlertCircleOutline />}
+          title="We couldn't load users"
+          description={error}
+          action={<Button variant="secondary" onClick={() => load()}>Try again</Button>}
+        />
+      )}
+
+      {status === 'ready' && filtered.length === 0 && (
+        <EmptyState
+          icon={<FiUsers />}
+          title={query ? 'No users match your search' : 'No users yet'}
+          action={query && <Button variant="secondary" onClick={() => setSearch('')}>Clear search</Button>}
+        />
+      )}
+
+      {status === 'ready' && filtered.length > 0 && (
+        <>
+          {/* Desktop table */}
+          <div className="hidden overflow-hidden rounded-2xl border border-line md:block">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-surface text-xs font-bold tracking-wide text-ink-muted uppercase">
+                <tr>
+                  <th scope="col" className="px-4 py-3">User</th>
+                  <th scope="col" className="px-4 py-3">Email</th>
+                  <th scope="col" className="px-4 py-3">Joined</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3 text-right"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {filtered.map((user) => (
+                  <tr key={user._id} className="hover:bg-surface/50">
+                    <th scope="row" className="px-4 py-3 font-semibold">
+                      <Link to={`/profile/${user._id}`} className="flex items-center gap-3 hover:underline">
+                        <Avatar name={user.fullname} size="sm" />
+                        <span className="truncate">{user.fullname}</span>
+                      </Link>
+                    </th>
+                    <td className="max-w-64 truncate px-4 py-3 text-ink-muted">{user.email}</td>
+                    <td className="px-4 py-3 text-ink-muted">{formatDate(user.createdAt)}</td>
+                    <td className="px-4 py-3"><StatusBadge blocked={user.adminblock} /></td>
+                    <td className="px-4 py-3 text-right">{blockButton(user)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <ul className="space-y-2 md:hidden">
+            {filtered.map((user) => (
+              <li key={user._id} className="flex items-center gap-3 rounded-2xl border border-line p-3">
+                <Avatar name={user.fullname} size="md" />
+                <div className="min-w-0 flex-1">
+                  <Link to={`/profile/${user._id}`} className="block truncate font-semibold hover:underline">
+                    {user.fullname}
+                  </Link>
+                  <p className="truncate text-xs text-ink-muted">{user.email}</p>
+                  <div className="mt-1.5"><StatusBadge blocked={user.adminblock} /></div>
+                </div>
+                {blockButton(user)}
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-4 text-center text-xs text-ink-subtle">
+            Showing {filtered.length} of {users.length} users
+          </p>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={Boolean(target)}
+        onClose={() => setTarget(null)}
+        onConfirm={toggleBlock}
+        loading={saving}
+        tone={target?.adminblock ? 'primary' : 'danger'}
+        title={target?.adminblock ? `Unblock ${target?.fullname}?` : `Block ${target?.fullname}?`}
+        description={
+          target?.adminblock
+            ? 'They will be able to post, save and interact again, and their pins will reappear.'
+            : 'Their pins will be hidden and they will no longer be able to post or save.'
+        }
+        confirmLabel={target?.adminblock ? 'Unblock' : 'Block'}
+      />
+    </>
+  )
 }
