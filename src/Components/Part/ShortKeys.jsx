@@ -1,70 +1,34 @@
-import React from 'react';
-import Settings from '../Pages/Settings';
-import Scrollbar from 'react-scrollbars-custom';
+import { useDocumentTitle } from '../../lib/hooks'
+import { SHORTCUTS } from '../../lib/constants'
+import { Alert } from '../UI/Field'
+import SettingsHeader from './SettingsHeader'
 
 export default function ShortKeys() {
-  const shortcuts = [
-    { key: "H", description: "Navigate to Home Feed" },
-    { key: "P", description: "Go to Profile page" },
-    { key: "S", description: "Open Settings page" },
-    { key: "C", description: "Open Create Pin page" },
-    { key: "E", description: "Navigate to Explore page" },
-    { key: "/", description: "Focus Search box" },
-    { key: "Shift + K", description: "Check your shortkeys" },
-    // { key: "Esc", description: "Close active menus or popups" },
-  ];
+  useDocumentTitle('Keyboard shortcuts')
 
   return (
-    <Scrollbar style={{ width: "100vw", height: '100vh' }}>
-      <div className="flex bg-neutral-50/30 min-h-screen">
-        {/* Settings Sidebar Wrapper */}
-        <div>
-          <Settings page={'shortkeys'} />
-        </div>
-
-        {/* Shortcuts content panel */}
-        <div className="w-screen ml-[20%] p-8">
-          <div className="text-black rounded-2xl relative max-w-3xl">
-
-            {/* Header */}
-            <div className="mb-8">
-              <h2 className="font-bold text-3xl text-neutral-800 tracking-tight mb-2">
-                Keyboard Shortcuts
-              </h2>
-              <p className="text-neutral-500 text-sm">
-                Use these keyboard shortcuts to navigate faster and perform key actions across the application.
-              </p>
-            </div>
-
-            {/* Shortcuts List Card */}
-            <div className="bg-white border border-neutral-200/60 rounded-3xl p-6 shadow-sm">
-              <div className="divide-y divide-neutral-100">
-                {shortcuts.map((shortcut, index) => (
-                  <div
-                    key={index}
-                    className="flex justify-between items-center py-4 first:pt-0 last:pb-0 hover:bg-neutral-50/50 px-2 rounded-xl transition-colors duration-150"
-                  >
-                    <span className="text-sm font-semibold text-neutral-700">
-                      {shortcut.description}
-                    </span>
-                    <div className="flex items-center">
-                      <kbd className="inline-flex items-center justify-center min-w-8 h-8 px-2.5 bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 text-neutral-800 font-mono text-sm font-bold rounded-lg shadow-sm transition-colors duration-100">
-                        {shortcut.key}
-                      </kbd>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Info Notice */}
-            <div className="mt-8 bg-gray-100 border border-gray-200 rounded-2xl p-4 text-xs text-red-700 leading-relaxed font-medium">
-              Shortcuts are active globally across the app, except when you are typing inside input fields, text areas, or editable content areas.
-            </div>
-
+    <>
+      <SettingsHeader title="Keyboard shortcuts" description="Move around faster without leaving the keyboard." />
+      <dl className="divide-y divide-line rounded-3xl border border-line">
+        {SHORTCUTS.map((shortcut) => (
+          <div key={shortcut.key} className="flex items-center justify-between gap-4 px-5 py-3.5">
+            <dt className="text-sm font-medium text-ink">{shortcut.description}</dt>
+            <dd className="flex shrink-0 items-center gap-1">
+              {shortcut.key.split(' + ').map((part, i) => (
+                <span key={part} className="flex items-center gap-1">
+                  {i > 0 && <span className="text-xs text-ink-subtle" aria-hidden="true">+</span>}
+                  <kbd className="inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-line bg-surface px-2 font-mono text-xs font-bold text-ink">
+                    {part}
+                  </kbd>
+                </span>
+              ))}
+            </dd>
           </div>
-        </div>
-      </div>
-    </Scrollbar>
-  );
+        ))}
+      </dl>
+      <Alert tone="info" className="mt-6">
+        Shortcuts are ignored while you’re typing in a text field, and when a dialog is open.
+      </Alert>
+    </>
+  )
 }

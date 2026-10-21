@@ -1,132 +1,235 @@
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { IoAlertCircleOutline, IoArrowBack, IoImageOutline } from 'react-icons/io5'
+import { api, errorMessage } from '../../lib/api'
+import { useDocumentTitle } from '../../lib/hooks'
+import { imageUrl } from '../../lib/image'
+import { toast } from '../../lib/toast'
+import Avatar from '../UI/Avatar'
+import Button from '../UI/Button'
+import { buttonClass } from '../UI/buttonClass'
+import { ConfirmDialog } from '../UI/Dialog'
+import EmptyState from '../UI/EmptyState'
+import { PageSpinner } from '../UI/Spinner'
 
-import axios from "axios";
-import React, { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import Scrollbar from "react-scrollbars-custom";
+const isObjectId = (value) => /^[a-f\d]{24}$/i.test(value || '')
+
+const BackLink = () => (
+  <Link to="/admin" className={buttonClass({ variant: 'ghost', size: 'sm', className: 'mb-4 -ml-2' })}>
+    <IoArrowBack aria-hidden="true" /> All posts
+  </Link>
+)
 
 export default function Viewpost() {
-  const location = useLocation();
+  const [params] = useSearchParams()
+  const id = params.get('id')
+  const validId = isObjectId(id)
   const navigate = useNavigate()
-  const post = location.state;
-  const [strike,setStrike] = useState(null)
-  const [block,setBlock] = useState(null)
-  
 
-  if (!post) {
+  const [post, setPost] = useState(null)
+  const [status, setStatus] = useState(validId ? 'loading' : 'invalid')
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
+
+  useDocumentTitle(post ? `Admin · ${post.postTitle}` : 'Admin · Post')
+
+  const load = useCallback(
+    async (signal) => {
+      if (!validId) return setStatus('invalid')
+      setStatus('loading')
+      try {
+        const { data } = await api.get(`/viewpost/${id}`, { signal })
+        setPost(data.post)
+        setStatus('ready')
+      } catch (err) {
+        if (signal?.aborted) return
+        setError(errorMessage(err))
+        setStatus(err.response?.status === 404 ? 'missing' : 'error')
+      }
+    },
+    [id, validId],
+  )
+
+  useEffect(() => {
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
+  }, [load])
+
+  const act = async (key, request, apply) => {
+    setBusy(key)
+    try {
+      const { data } = await request()
+      apply?.(data)
+      toast.success(data.message)
+      return true
+    } catch (err) {
+      toast.error(errorMessage(err))
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (status === 'loading') return <PageSpinner label="Loading post" />
+
+  if (status !== 'ready') {
+    const copy = {
+      invalid: { title: 'No post selected', description: 'Open a post from the posts list to review it.' },
+      missing: { title: 'Post not found', description: 'It may have been deleted.' },
+      error: { title: "We couldn't load this post", description: error },
+    }[status]
     return (
-      <div className="w-screen min-h-screen flex items-center justify-center text-gray-400 bg-gray-950">
-        <p>No post data available.</p>
-      </div>
-    );
+      <>
+        <BackLink />
+        <EmptyState
+          icon={<IoAlertCircleOutline />}
+          {...copy}
+          action={status === 'error' && <Button variant="secondary" onClick={() => load()}>Try again</Button>}
+        />
+      </>
+    )
   }
 
-  const fetchAction=async()=>{
-    try {
-        const {data} = await axios.get(`http://localhost:3500/fetchactions`,{params:{userId,postId:post._id}})
-        console.log(data);
-        
-        setStrike(data.isStrike)
-        setBlock(data.isBlock)
-    } catch (error) {
-        console.log(error);
-    }
-  }
-
-  useEffect(()=>{
-    fetchAction()
-  },[])
-
-
-  
-  const userId = post.userId._id 
-  const blockUser = async()=>{
-    try {
-        const {data} = await axios.post('http://localhost:3500/adminblock',{id:userId})
-        setBlock(data.success)
-    } catch (error) {
-        console.log(error);
-    }
-  }
-
-  const strikeImage = async(postId)=>{
-    try {
-        const {data} = await axios.post('http://localhost:3500/adminstrike',{postId})
-        setStrike(data.success)
-    } catch (error) {
-        console.log(error);
-    }
-  }
+  const author = post.userId
+  const badges = [
+    post.archive && { label: 'Archived', className: 'bg-surface text-ink' },
+    post.adminStrike && { label: 'Struck', className: 'bg-amber-50 text-amber-800' },
+    author?.adminblock && { label: 'Author blocked', className: 'bg-brand-50 text-brand-700' },
+  ].filter(Boolean)
 
   return (
-    <Scrollbar style={{ width: "100vw", height: '100vh', background:"gray",  }}>
-    <div className="w-full min-h-screen bg-gray-950 text-gray-200 flex flex-col lg:flex-row">
-      
-      {/* Left Side: Image */}
-      <div className="w-full lg:w-2/3 bg-black flex items-start justify-center">
-        <img
-          src={post.postImage}
-          alt="Post"
-          className="w-full h-full object-contain max-h-screen"
-        />
-      </div>
-
-      {/* Right Side: Details */}
-      <div className="w-full lg:w-1/3 bg-gray-900 p-8 flex flex-col justify-between">
-        
-        {/* Top Section: User Info */}
-        <div>
-          <div className="flex items-center gap-3 border-b border-gray-800 pb-4 mb-6">
-            <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center text-lg font-bold">
-              {post.userId?.fullname?.[0] || "U"}
+    <>
+      <BackLink />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:gap-10">
+        <div className="overflow-hidden rounded-3xl bg-surface">
+          {imageFailed || !post.postImage ? (
+            <div className="flex aspect-[4/5] flex-col items-center justify-center gap-2 text-ink-subtle">
+              <IoImageOutline className="text-4xl" aria-hidden="true" />
+              <span className="text-sm font-semibold">Image unavailable</span>
             </div>
-            <div>
-              <Link
-                to={`/profile/${post.userId?._id}`}
-                className="text-lg font-semibold hover:underline"
+          ) : (
+            <img
+              src={imageUrl(post.postImage, 1200)}
+              alt={post.postTitle || ''}
+              onError={() => setImageFailed(true)}
+              className="mx-auto max-h-[80vh] w-full object-contain"
+            />
+          )}
+        </div>
+
+        <section aria-labelledby="admin-post-title" className="min-w-0">
+          {badges.length > 0 && (
+            <ul className="mb-3 flex flex-wrap gap-2" aria-label="Status">
+              {badges.map((b) => (
+                <li key={b.label} className={`rounded-full px-3 py-1 text-xs font-bold ${b.className}`}>
+                  {b.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          <h1 id="admin-post-title" className="text-2xl font-extrabold tracking-tight break-words sm:text-3xl">
+            {post.postTitle}
+          </h1>
+          {post.postDescription && <p className="mt-3 leading-relaxed break-words text-ink-muted">{post.postDescription}</p>}
+
+          {post.tags?.length > 0 && (
+            <ul className="mt-4 flex flex-wrap gap-2" aria-label="Tags">
+              {post.tags.map((tag) => (
+                <li key={tag} className="rounded-full bg-surface px-3 py-1 text-xs font-semibold">
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <dl className="mt-6 grid gap-3 rounded-2xl border border-line p-4 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-ink-muted">Author</dt>
+              <dd className="min-w-0">
+                {author ? (
+                  <Link to={`/profile/${author._id}`} className="flex items-center gap-2 font-semibold hover:underline">
+                    <Avatar src={author.image} name={author.fullname} size="xs" />
+                    <span className="truncate">{author.fullname}</span>
+                  </Link>
+                ) : (
+                  'Unknown'
+                )}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-ink-muted">Created</dt>
+              <dd className="font-semibold">{post.createdAt ? new Date(post.createdAt).toLocaleString() : '—'}</dd>
+            </div>
+            {post.location && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-ink-muted">Location</dt>
+                <dd className="truncate font-semibold">{post.location}</dd>
+              </div>
+            )}
+            {post.url && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-ink-muted">Link</dt>
+                <dd className="min-w-0 truncate">
+                  <a href={post.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-700 hover:underline">
+                    {post.url}
+                  </a>
+                </dd>
+              </div>
+            )}
+          </dl>
+
+          <div className="mt-6 flex flex-wrap gap-2">
+            {author && (
+              <Button
+                variant={author.adminblock ? 'secondary' : 'dark'}
+                loading={busy === 'block'}
+                disabled={Boolean(busy)}
+                onClick={() =>
+                  act('block', () => api.post('/adminblock', { id: author._id }), (data) =>
+                    setPost((p) => ({ ...p, userId: { ...p.userId, adminblock: data.blocked } })),
+                  )
+                }
               >
-                {post.userId?.fullname || "Unknown User"}
-              </Link>
-              <p className="text-sm text-gray-400">View profile</p>
-            </div>
+                {author.adminblock ? 'Unblock author' : 'Block author'}
+              </Button>
+            )}
+            <Button
+              variant={post.adminStrike ? 'secondary' : 'outline'}
+              loading={busy === 'strike'}
+              disabled={Boolean(busy)}
+              onClick={() =>
+                act('strike', () => api.post('/adminstrike', { postId: post._id }), (data) =>
+                  setPost((p) => ({ ...p, adminStrike: data.striked })),
+                )
+              }
+            >
+              {post.adminStrike ? 'Remove strike' : 'Strike post'}
+            </Button>
+            <Button variant="danger" disabled={Boolean(busy)} onClick={() => setConfirmDelete(true)}>
+              Delete post
+            </Button>
           </div>
-
-          {/* Title & Description */}
-          <h1 className="text-3xl font-bold mb-4 break-words">{post.postTitle}</h1>
-          <p className="text-gray-300 leading-relaxed break-words">
-            {post.postDescription}
-          </p>
-         <div className="flex flex-wrap gap-2">
-            {post.tags.map((tag, i) => (
-                <div 
-                key={i} 
-                className="bg-gray-200 px-3 py-1 text-black rounded-full text-sm whitespace-nowrap"
-                >
-                {tag}
-                </div>
-            ))}
-         </div>
-
-        </div>
-
-        {/* Bottom Section: Buttons */}
-        <div className="flex flex-wrap gap-3 pt-6 border-t border-gray-800">
-          <button className="flex-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 transition"
-                onClick={blockUser}
-                >
-             {block?'Unblock User':'Block User'}
-          </button>
-          <button className="flex-1 px-4 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-700 transition"
-            onClick={()=>{strikeImage(post._id)}}
-          >
-             {strike? 'Unstrike Image' : 'Strike Image'}
-          </button>
-          {/* <button className="flex-1 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 transition">
-             Report Image
-          </button> */}
-        </div>
-
+        </section>
       </div>
-    </div>
-    </Scrollbar>
-  );
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Delete this post?"
+        description="It will be permanently removed for everyone. This can't be undone."
+        confirmLabel="Delete"
+        loading={busy === 'delete'}
+        onConfirm={async () => {
+          const ok = await act('delete', () => api.post('/delete', { postId: post._id }))
+          if (ok) {
+            setConfirmDelete(false)
+            navigate('/admin')
+          }
+        }}
+      />
+    </>
+  )
 }
