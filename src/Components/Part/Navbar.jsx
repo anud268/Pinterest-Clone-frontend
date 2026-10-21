@@ -145,7 +145,7 @@ function SearchBox() {
             setType(e.target.value)
             inputRef.current?.focus()
           }}
-          className="h-full shrink-0 cursor-pointer rounded-r-full border-l border-line bg-transparent pr-3 pl-3 text-sm font-semibold text-ink-muted focus:outline-none sm:pr-4"
+          className="h-full shrink-0 cursor-pointer rounded-r-full border-l border-line bg-transparent pr-2 pl-2 text-sm font-semibold text-ink-muted focus:outline-none sm:pr-4 sm:pl-3"
         >
           {SEARCH_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -198,7 +198,7 @@ export default function Navbar() {
         <div className="md:hidden">
           <Logo />
         </div>
-        <div className="flex flex-1 justify-center">
+        <div className="flex min-w-0 flex-1 justify-center">
           <SearchBox />
         </div>
         <div className="md:hidden">

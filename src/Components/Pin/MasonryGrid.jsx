@@ -24,7 +24,7 @@ const distribute = (items, count, columnWidth) => {
   return columns
 }
 
-export default function MasonryGrid({ items, renderItem, minColumnWidth = 236, maxColumns = 7, className = '' }) {
+export default function MasonryGrid({ items, renderItem, minColumnWidth = 220, maxColumns = 7, className = '' }) {
   const [ref, width] = useElementWidth()
   const { gap, count, columnWidth } = width ? layout(width, minColumnWidth, maxColumns) : { gap: 16, count: 0, columnWidth: 0 }
   const columns = useMemo(() => (count ? distribute(items, count, columnWidth) : []), [items, count, columnWidth])
@@ -44,7 +44,7 @@ export default function MasonryGrid({ items, renderItem, minColumnWidth = 236, m
 
 const SKELETON_HEIGHTS = [300, 220, 360, 260, 330, 200, 280, 380, 240, 310, 210, 350, 270, 230, 320, 290]
 
-export function MasonrySkeleton({ count = 16, minColumnWidth = 236, maxColumns = 7 }) {
+export function MasonrySkeleton({ count = 16, minColumnWidth = 220, maxColumns = 7 }) {
   const [ref, width] = useElementWidth()
   const { gap, count: columns } = width ? layout(width, minColumnWidth, maxColumns) : { gap: 16, count: 0 }
 
