@@ -27,6 +27,8 @@ const Archive = lazy(() => import('./Components/Part/Archive'))
 const NotInterested = lazy(() => import('./Components/Part/NotInterested'))
 const BlockedUsers = lazy(() => import('./Components/Part/BlockedUsers'))
 const ShortKeys = lazy(() => import('./Components/Part/ShortKeys'))
+const ChatSettings = lazy(() => import('./Components/Part/ChatSettings'))
+const ChatPage = lazy(() => import('./Components/Chat/ChatPage'))
 const AdminLayout = lazy(() => import('./Components/AdminPanel/AdminLayout'))
 const AdminPage = lazy(() => import('./Components/AdminPanel/AdminPage'))
 const AdminUserlist = lazy(() => import('./Components/AdminPanel/AdminUserlist'))
@@ -75,6 +77,8 @@ export default function App() {
             <Route path='/saved' element={<Saved />} />
             <Route path='/create' element={<Create />} />
             <Route path='/profile/:id' element={<Profile />} />
+            <Route path='/messages' element={<ChatPage />} />
+            <Route path='/messages/:conversationId' element={<ChatPage />} />
             <Route element={<Settings />}>
               <Route path='/settings' element={<EditProfile />} />
               <Route path='/settings/profile/edit' element={<EditProfile />} />
@@ -82,6 +86,7 @@ export default function App() {
               <Route path='/notinterested' element={<NotInterested />} />
               <Route path='/settings/blockedusers' element={<BlockedUsers />} />
               <Route path='/settings/shortkeys' element={<ShortKeys />} />
+              <Route path='/settings/chat' element={<ChatSettings />} />
             </Route>
           </Route>
 

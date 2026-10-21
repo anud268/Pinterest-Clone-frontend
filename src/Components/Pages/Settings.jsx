@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { FiUser } from 'react-icons/fi'
 import { MdBlock, MdOutlineArchive, MdOutlineKeyboard } from 'react-icons/md'
-import { IoEyeOffOutline } from 'react-icons/io5'
+import { IoEyeOffOutline, IoLockClosedOutline } from 'react-icons/io5'
 import { PageSpinner } from '../UI/Spinner'
 
 const ITEMS = [
@@ -10,6 +10,7 @@ const ITEMS = [
   { to: '/settings/archive', label: 'Archived pins', icon: MdOutlineArchive },
   { to: '/notinterested', label: 'Hidden pins', icon: IoEyeOffOutline },
   { to: '/settings/blockedusers', label: 'Blocked accounts', icon: MdBlock },
+  { to: '/settings/chat', label: 'Chat & privacy', icon: IoLockClosedOutline },
   { to: '/settings/shortkeys', label: 'Keyboard shortcuts', icon: MdOutlineKeyboard },
 ]
 
